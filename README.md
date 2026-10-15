@@ -28,7 +28,7 @@ https://<FN_ID>.fnos.net/app/llmproxy
 
 ## 项目组成
 
-### `fnconnect-proxy/` — v1.0.5
+### `fnconnect-proxy/` — v1.0.6
 
 运行在客户端主机，或与 Codex 位于同一个容器中。
 
@@ -38,7 +38,7 @@ https://<FN_ID>.fnos.net/app/llmproxy
 - 自动附加 FN Connect / 统一网关所需 Cookie，无需把这些凭据写入 Codex 配置。
 - 原样保留 LLM 请求中的 `Authorization` 请求头。
 - SSE 流式响应即时转发，不缓存 token stream。
-- v1.0.5 只使用当前有效的 `fnos-token` 刷新 `entry-token`；在 `/app/...` 会话的 longToken 续期流程被充分验证前，不会自动轮换 `fnos-token`。
+- 每 30 分钟刷新 `entry-token`；当前 `fnos-token` 失效时使用 `longToken` 续期，并读取运行期间重新登录写入的新凭据。
 
 详细说明见 [`fnconnect-proxy/README.md`](fnconnect-proxy/README.md)。
 
@@ -159,7 +159,7 @@ codex
 
 ## 当前版本
 
-- `fnconnect-proxy`: **v1.0.5**
+- `fnconnect-proxy`: **v1.0.6**
 - `fnos-llmproxy`: **v1.2.1**
 
 ## 许可证

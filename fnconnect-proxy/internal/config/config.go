@@ -1,11 +1,12 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -73,21 +74,78 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-func Save(path string, cfg Config) error {
-	cfg.UpdatedAt = time.Now()
+// Update serializes all cooperating writers, including login, logout and refresh.
+func Update(ctx context.Context, path string, change func(*Config) error) (Config, error) {
+	if err := ctx.Err(); err != nil {
+		return Config{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+		return Config{}, err
+	}
+	unlock, err := lockConfig(ctx, path+".lock")
+	if err != nil {
+		return Config{}, err
+	}
+	defer unlock()
+	if err := ctx.Err(); err != nil {
+		return Config{}, err
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		return Config{}, err
+	}
+	previous := cfg.UpdatedAt
+	if err := change(&cfg); err != nil {
+		return Config{}, err
+	}
+	cfg.UpdatedAt = time.Now().UTC()
+	if !cfg.UpdatedAt.After(previous) {
+		cfg.UpdatedAt = previous.Add(time.Nanosecond)
 	}
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return Config{}, err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0600); err != nil {
-		return err
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".fnconnect-config-*")
+	if err != nil {
+		return Config{}, err
 	}
-	if runtime.GOOS != "windows" {
-		_ = os.Chmod(tmp, 0600)
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.Write(append(b, '\n')); err == nil {
+		err = tmp.Sync()
 	}
-	return os.Rename(tmp, path)
+	closeErr := tmp.Close()
+	if err != nil {
+		return Config{}, err
+	}
+	if closeErr != nil {
+		return Config{}, closeErr
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+var ErrChanged = errors.New("configuration changed during refresh")
+
+// SaveIfUnchanged checks the revision while holding the same lock as Save.
+func SaveIfUnchanged(ctx context.Context, path string, expected time.Time, next Config) (Config, error) {
+	return Update(ctx, path, func(current *Config) error {
+		if !current.UpdatedAt.Equal(expected) {
+			return ErrChanged
+		}
+		*current = next
+		return nil
+	})
+}
+
+func Save(path string, cfg Config) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := Update(ctx, path, func(current *Config) error { *current = cfg; return nil })
+	if err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return nil
 }

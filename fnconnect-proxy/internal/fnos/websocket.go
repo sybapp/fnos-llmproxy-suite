@@ -3,6 +3,7 @@ package fnos
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/tls"
@@ -24,7 +25,7 @@ type wsConn struct {
 	br   *bufio.Reader
 }
 
-func dialWebSocket(server string, timeout time.Duration) (*wsConn, error) {
+func dialWebSocket(ctx context.Context, server string, timeout time.Duration) (*wsConn, error) {
 	server = strings.TrimSpace(server)
 	server = strings.TrimPrefix(server, "https://")
 	server = strings.TrimPrefix(server, "http://")
@@ -47,16 +48,25 @@ func dialWebSocket(server string, timeout time.Duration) (*wsConn, error) {
 	}
 
 	d := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
-	raw, err := d.Dial("tcp", host)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	raw, err := d.DialContext(ctx, "tcp", host)
 	if err != nil {
 		return nil, err
 	}
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = raw.Close(); close(stopped) })
+	defer func() {
+		if !stop() {
+			<-stopped
+		}
+	}()
 	tlsConn := tls.Client(raw, &tls.Config{ServerName: strings.Trim(hostName, "[]"), MinVersion: tls.VersionTLS12})
-	if err := tlsConn.SetDeadline(time.Now().Add(timeout)); err != nil {
+	if err := tlsConn.SetDeadline(func() time.Time { deadline, _ := ctx.Deadline(); return deadline }()); err != nil {
 		_ = raw.Close()
 		return nil, err
 	}
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = raw.Close()
 		return nil, err
 	}

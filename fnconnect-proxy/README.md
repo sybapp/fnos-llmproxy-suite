@@ -1,4 +1,4 @@
-# fnconnect-proxy v1.0.5
+# fnconnect-proxy v1.0.6
 
 # fnconnect-proxy
 
@@ -19,15 +19,15 @@ Codex -> http://127.0.0.1:13431/v1/...
 - 首次用户名/密码登录，`stay=true` 获取 `longToken`
 - 密码不写入配置文件
 - 保存 `longToken` / `fnos-token` / `entry-token` / `sign_key`，配置文件权限 0600
-- entry-token 默认按 8 小时管理，提前 2 小时刷新
-- fnos-token 可用时直接刷新 entry-token
-- 自动刷新只使用当前有效 `fnos-token` 换取新的 `entry-token`；不会自动轮换 `fnos-token`
-- FN Connect 返回“暂无权限访问该服务”或统一网关精确返回 `invalid token` 时，仅安全刷新 `entry-token` 并重试一次
+- 每 30 分钟刷新一次 `entry-token`，不依赖固定的过期时间猜测
+- 当前 `fnos-token` 失效或即将过期时，自动使用 `longToken` 换取新会话并更新本地凭据
+- FN Connect 返回“暂无权限访问该服务”或统一网关精确返回 `invalid token` 时，先刷新 entry-token；仍被拒绝则使用 longToken 更新会话，最多重试两次
+- `serve` 运行期间会一起更新重新登录写入的目标地址和凭据；并发刷新不会覆盖新登录或退出的配置
 - 原样保留 Codex 的 `Authorization: Bearer ...`
 - SSE 流式响应每个 chunk 立即 flush
 - 不把 FN 登录 Cookie 暴露给 Codex 配置
 
-> 注意：8 小时 / 25 天是当前社区客户端采用的生命周期假设，不是飞牛公开 SLA。v1.0.5 为避免再次破坏已验证可用的 `/app` 会话，不会自动使用 longToken 执行 `user.tokenLogin`；fnos-token 到期后会提示重新 `login`。
+> 注意：8 小时 / 25 天是本地状态显示使用的生命周期估计，不是飞牛公开 SLA。代理每 30 分钟主动刷新，并在旧会话被拒绝时尝试使用 `longToken` 续期；服务器仍拒绝时会在日志或请求错误中报告续期失败。
 
 ## 1. 首次登录
 
@@ -125,17 +125,20 @@ fnconnect-proxy refresh
 fnconnect-proxy logout
 ```
 
-`refresh` 强制刷新 entry-token；`logout` 仅清除本地 token，不修改 NAS 账号。
+`refresh` 使用保存的 `longToken` 强制获取新的 `fnos-token` 和 `entry-token`；没有可用的 `longToken` 时需要重新登录。`logout` 仅清除本地 token，不修改 NAS 账号。
 
 ## 安全
 
 `longToken` 是长期登录凭据，应视同密码级秘密。不要上传 `~/.config/fnconnect-proxy/config.json`，不要粘贴到公开日志。helper 只监听 `127.0.0.1`，不要改成 `0.0.0.0`，除非你明确知道风险。
 
-## v1.0.5
+## v1.0.6
 
 - 基于 v1.0.3 的已验证转发行为：`Authorization` 原样穿透，不做私有 Header 改名。
 - `/app/...` Cookie 保持已实测可用的形态：`mode=relay; language=zh-CN; fnos-token=...; entry-token=...`。
-- 自动刷新只更新 `entry-token`，绝不通过 longToken 自动替换当前 `fnos-token`。
-- `fnos-token` 到期、或使用当前 fnos-token 刷新 entry-token 后网关仍拒绝时，明确要求重新执行 `fnconnect-proxy login`。
-- 识别统一网关的 `HTTP 200 text/plain: invalid token`，但处理方式仍然是“只刷新 entry-token 一次”，不会触发 longToken 会话轮换。
-- longToken 继续安全保存供后续验证/未来版本使用，但 v1.0.5 运行时不会自动消费它。
+- 自动刷新每 30 分钟执行，降低对 token 生命周期估计的依赖。
+- 旧 `fnos-token` 过期或即将过期时，使用保存的 `longToken` 获取新会话；签名式 `tokenLogin` 沿用已建立的签名密钥，并通过 entry-token 交换验证。
+- 网关仍拒绝已刷新 entry-token 的请求时，强制更新 fnos-token 后再重试，总计最多两次。
+- 目标地址、网关模式和认证 Cookie 使用同一份配置快照，重新登录切换 NAS 时一起生效。
+- 刷新失败的回退使用新的 WebSocket；取消和超时会关闭连接，避免遗留读取线程抢走响应。
+- 配置保存使用进程间文件锁、版本比较和独立临时文件，避免刷新覆盖新登录或退出。
+- 本地 TLS 模拟验证与真实 NAS 验证范围见 [VALIDATION.md](VALIDATION.md)。

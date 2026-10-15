@@ -49,22 +49,12 @@ func (c *Client) Connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	type result struct {
-		w   *wsConn
-		err error
+	w, err := dialWebSocket(ctx, c.server, c.timeout)
+	if err != nil {
+		return err
 	}
-	ch := make(chan result, 1)
-	go func() { w, e := dialWebSocket(c.server, c.timeout); ch <- result{w, e} }()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case r := <-ch:
-		if r.err != nil {
-			return r.err
-		}
-		c.ws, c.aesKey, c.iv = r.w, key, iv
-		return nil
-	}
+	c.ws, c.aesKey, c.iv = w, key, iv
+	return nil
 }
 
 func (c *Client) Close() error {
@@ -123,8 +113,7 @@ func responseError(prefix string, m map[string]any) error {
 		msg = fieldString(m, "error")
 	}
 	if msg == "" {
-		b, _ := json.Marshal(m)
-		msg = string(b)
+		msg = fmt.Sprintf("errno %v", m["errno"])
 	}
 	return fmt.Errorf("%s: %s", prefix, msg)
 }
@@ -171,30 +160,40 @@ func (c *Client) request(ctx context.Context, req string, params map[string]any,
 			message = string(raw)
 		}
 	}
-	if err := c.ws.WriteText(message); err != nil {
+	// A single synchronous reader owns this socket. Cancellation closes it,
+	// so no abandoned reader can consume a later refresh response.
+	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	deadline, _ := requestCtx.Deadline()
+	if err := c.ws.conn.SetDeadline(deadline); err != nil {
 		return nil, err
 	}
-
-	deadline := time.NewTimer(c.timeout)
-	defer deadline.Stop()
-	for {
-		type rr struct {
-			b   []byte
-			err error
+	ws := c.ws
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(requestCtx, func() { _ = ws.Close(); close(stopped) })
+	defer func() {
+		if !stop() {
+			<-stopped
 		}
-		ch := make(chan rr, 1)
-		go func() { b, e := c.ws.ReadMessage(); ch <- rr{b, e} }()
-		var b []byte
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-deadline.C:
-			return nil, fmt.Errorf("request timeout: %s", req)
-		case r := <-ch:
-			if r.err != nil {
-				return nil, r.err
-			}
-			b = r.b
+		_ = ws.conn.SetDeadline(time.Time{})
+	}()
+	fail := func(err error) (map[string]any, error) {
+		_ = ws.Close()
+		if requestCtx.Err() != nil {
+			return nil, requestCtx.Err()
+		}
+		return nil, err
+	}
+	if err := requestCtx.Err(); err != nil {
+		return fail(err)
+	}
+	if err := ws.WriteText(message); err != nil {
+		return fail(err)
+	}
+	for {
+		b, err := ws.ReadMessage()
+		if err != nil {
+			return fail(err)
 		}
 		var m map[string]any
 		if json.Unmarshal(b, &m) != nil {
@@ -333,7 +332,10 @@ func (c *Client) RefreshWithLongToken(ctx context.Context, longToken, signKey, b
 	if x := fieldString(m, "backId"); x != "" {
 		c.backID = x
 	}
-	sess := Session{FNOSToken: fieldString(m, "token"), LongToken: longToken, SignKey: signKey, BackID: c.backID, UID: fieldInt64(m, "uid"), Admin: fieldBool(m, "admin")}
+	// tokenLogin is signed with the established key. This connection has
+	// never shared its fresh AES key/IV; they cannot decrypt a returned secret.
+	// Keep the existing signing key and verify it through entry-token exchange.
+	sess := Session{FNOSToken: fieldString(m, "token"), LongToken: longToken, SignKey: c.signKey, BackID: c.backID, UID: fieldInt64(m, "uid"), Admin: fieldBool(m, "admin")}
 	if x := fieldString(m, "longToken"); x != "" {
 		sess.LongToken = x
 	}

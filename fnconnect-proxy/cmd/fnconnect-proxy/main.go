@@ -19,7 +19,7 @@ import (
 	pxy "fnconnect-proxy/internal/proxy"
 )
 
-const version = "1.0.5"
+const version = "1.0.6"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `fnconnect-proxy %s
@@ -27,7 +27,7 @@ func usage() {
 Commands:
   login    Login to fnOS, save longToken/fnos-token/entry-token (password is not saved)
   serve    Listen locally and proxy requests through FN Connect
-  refresh  Refresh entry-token using the current fnos-token (never rotates fnos-token)
+  refresh  Renew fnos-token and entry-token using the saved longToken
   status   Show configuration and token expiry
   logout   Remove stored tokens
   version  Show version
@@ -66,7 +66,10 @@ func cmdLogin(args []string) {
 	passwordStdin := fs.Bool("password-stdin", false, "read password from stdin")
 	_ = fs.Parse(args)
 	path := cfgPath()
-	cfg, _ := appcfg.Load(path)
+	cfg, err := appcfg.Load(path)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if *server == "" {
 		*server = cfg.Server
 	}
@@ -132,7 +135,7 @@ func cmdRefresh() {
 	mgr := pxy.NewTokenManager(path, cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	if err := mgr.Refresh(ctx, true); err != nil {
+	if err := mgr.RenewSession(ctx); err != nil {
 		log.Fatal(err)
 	}
 	c := mgr.Config()
@@ -165,19 +168,20 @@ func fmtTime(t time.Time) string {
 
 func cmdLogout() {
 	path := cfgPath()
-	cfg, err := appcfg.Load(path)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := appcfg.Update(ctx, path, func(cfg *appcfg.Config) error {
+		cfg.FNOSToken = ""
+		cfg.EntryToken = ""
+		cfg.LongToken = ""
+		cfg.SignKey = ""
+		cfg.BackID = ""
+		cfg.FNOSTokenExpires = time.Time{}
+		cfg.EntryTokenExpires = time.Time{}
+		cfg.LongTokenExpires = time.Time{}
+		return nil
+	})
 	if err != nil {
-		log.Fatal(err)
-	}
-	cfg.FNOSToken = ""
-	cfg.EntryToken = ""
-	cfg.LongToken = ""
-	cfg.SignKey = ""
-	cfg.BackID = ""
-	cfg.FNOSTokenExpires = time.Time{}
-	cfg.EntryTokenExpires = time.Time{}
-	cfg.LongTokenExpires = time.Time{}
-	if err := appcfg.Save(path, cfg); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("tokens cleared")
