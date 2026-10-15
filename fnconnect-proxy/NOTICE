@@ -1,0 +1,5 @@
+Protocol behavior was independently implemented in Go with reference to public MIT-licensed projects:
+- https://github.com/donnel666/fnos-git-auth
+- https://github.com/FNOSP/fnnas-api
+
+No Python runtime or code from those projects is required by this binary.
