@@ -1,0 +1,19 @@
+# Build artifacts
+**/dist/
+**/*.fpk
+**/*.fpk.sha256
+
+# Local runtime configuration / secrets
+.env
+.env.*
+!.env.example
+**/config.json
+**/upstream_url
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Go
+coverage.out

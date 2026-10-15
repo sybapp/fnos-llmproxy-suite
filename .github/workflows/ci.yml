@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project:
+          - fnconnect-proxy
+          - fnos-llmproxy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.project }}/go.mod
+          cache-dependency-path: ${{ matrix.project }}/go.mod
+      - name: Test
+        working-directory: ${{ matrix.project }}
+        run: go test ./...
+      - name: Vet
+        working-directory: ${{ matrix.project }}
+        run: go vet ./...
+      - name: Build amd64
+        working-directory: ${{ matrix.project }}
+        run: |
+          if [ "${{ matrix.project }}" = "fnconnect-proxy" ]; then
+            GOOS=linux GOARCH=amd64 go build ./cmd/fnconnect-proxy
+          else
+            GOOS=linux GOARCH=amd64 go build ./cmd/llmproxy
+          fi
