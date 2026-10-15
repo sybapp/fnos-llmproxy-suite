@@ -106,16 +106,32 @@ codex
 
 如果你的上游只支持 Chat Completions 而不是 Responses API，需要按上游能力调整 Codex provider。
 
-## 4. 自动启动（systemd --user）
+## 4. 独立后台开关（Linux）
+
+在 `fnconnect-proxy/` 目录中编译，然后使用独立脚本管理后台进程：
 
 ```bash
-mkdir -p ~/.local/bin ~/.config/systemd/user
-cp fnconnect-proxy ~/.local/bin/
-cp systemd/fnconnect-proxy.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now fnconnect-proxy.service
-journalctl --user -u fnconnect-proxy -f
+go build -o dist/fnconnect-proxy ./cmd/fnconnect-proxy
+./server.sh          # 切换：未运行则启动，已运行则停止
+./server.sh start    # 后台启动；已启动时不重复创建进程
+./server.sh stop     # 优雅停止
+./server.sh restart  # 重启
+./server.sh status   # 查看状态；未运行时退出码为 3
+./server.sh logs     # 查看最近 100 行日志
 ```
+
+脚本需要 Bash 和 `flock`，仅管理自己启动的进程。PID、进程启动时间和系统启动标识一起校验，避免旧 PID 被复用后误停其他进程；并发启停使用文件锁。启动失败会显示日志位置，停止最多等待 10 秒。后台进程不自动重启，也不设置开机启动。
+
+默认使用脚本旁的 `dist/fnconnect-proxy`，运行记录保存在 `.run/`（已忽略提交）。可以显式指定可执行文件、运行目录、登录配置和监听地址：
+
+```bash
+FNCONNECT_PROXY_BIN=/path/to/fnconnect-proxy \
+FNCONNECT_PROXY_RUN_DIR=/path/to/runtime \
+FNCONNECT_PROXY_CONFIG=/path/to/config.json \
+./server.sh start --listen 127.0.0.1:13431
+```
+
+重启使用当前命令提供的参数和环境变量；如果使用自定义运行目录，后续启停也应指定相同目录。
 
 ## 5. 管理
 

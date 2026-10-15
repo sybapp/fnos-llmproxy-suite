@@ -43,6 +43,13 @@ fnconnect-proxy builds: linux/amd64, windows/amd64, darwin/arm64
 
 Windows and macOS builds were cross-compiled; runtime tests ran on Linux.
 
+## Standalone switch
+
+`server.sh` replaces the previous service template with an explicit Linux
+background process switch. Shell syntax and patch whitespace were checked with
+`bash -n server.sh` and `git diff --check`. The user requested no local
+installation or use of this switch, so its start/stop commands were not executed.
+
 ## Live NAS verification — 2026-10-15
 
 Using the user's real login and a binary built from the current source, the

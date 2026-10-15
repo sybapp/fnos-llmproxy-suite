@@ -39,6 +39,7 @@ https://<FN_ID>.fnos.net/app/llmproxy
 - 原样保留 LLM 请求中的 `Authorization` 请求头。
 - SSE 流式响应即时转发，不缓存 token stream。
 - 每 30 分钟刷新 `entry-token`；当前 `fnos-token` 失效时使用 `longToken` 续期，并读取运行期间重新登录写入的新凭据。
+- 独立 `server.sh` 开关支持后台启动、停止、重启和查看状态。
 
 详细说明见 [`fnconnect-proxy/README.md`](fnconnect-proxy/README.md)。
 
