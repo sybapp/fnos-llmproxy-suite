@@ -1,4 +1,4 @@
-# fnconnect-proxy v1.0.6
+# fnconnect-proxy v1.0.7
 
 # fnconnect-proxy
 
@@ -106,32 +106,40 @@ codex
 
 如果你的上游只支持 Chat Completions 而不是 Responses API，需要按上游能力调整 Codex provider。
 
-## 4. 独立后台开关（Linux）
+## 4. CLI 后台管理
 
-在 `fnconnect-proxy/` 目录中编译，然后使用独立脚本管理后台进程：
+编译后直接用 CLI 管理后台进程：
 
 ```bash
 go build -o dist/fnconnect-proxy ./cmd/fnconnect-proxy
-./server.sh          # 切换：未运行则启动，已运行则停止
-./server.sh start    # 后台启动；已启动时不重复创建进程
-./server.sh stop     # 优雅停止
-./server.sh restart  # 重启
-./server.sh status   # 查看状态；未运行时退出码为 3
-./server.sh logs     # 查看最近 100 行日志
+./dist/fnconnect-proxy start
+./dist/fnconnect-proxy stop
+./dist/fnconnect-proxy restart
+./dist/fnconnect-proxy status
+./dist/fnconnect-proxy logs
+./dist/fnconnect-proxy logs --lines 200
 ```
 
-脚本需要 Bash 和 `flock`，仅管理自己启动的进程。PID、进程启动时间和系统启动标识一起校验，避免旧 PID 被复用后误停其他进程；并发启停使用文件锁。启动失败会显示日志位置，停止最多等待 10 秒。后台进程不自动重启，也不设置开机启动。
-
-默认使用脚本旁的 `dist/fnconnect-proxy`，运行记录保存在 `.run/`（已忽略提交）。可以显式指定可执行文件、运行目录、登录配置和监听地址：
+`start` 在后台运行代理，终端退出后继续运行；已启动时返回现有实例的状态。`stop` 等待请求处理和连接关闭后退出。`restart` 默认保留运行中实例的监听地址，也可通过 `--listen` 修改。`status` 同时显示后台进程状态、登录配置和 token 有效期。`serve` 继续用于前台运行，CLI 启停仅管理 `start` 创建的后台实例。
 
 ```bash
-FNCONNECT_PROXY_BIN=/path/to/fnconnect-proxy \
-FNCONNECT_PROXY_RUN_DIR=/path/to/runtime \
-FNCONNECT_PROXY_CONFIG=/path/to/config.json \
-./server.sh start --listen 127.0.0.1:13431
+./dist/fnconnect-proxy start --listen 127.0.0.1:13431
+./dist/fnconnect-proxy restart --listen 127.0.0.1:13432
 ```
 
-重启使用当前命令提供的参数和环境变量；如果使用自定义运行目录，后续启停也应指定相同目录。
+默认运行记录和日志保存在登录配置文件旁的 `run/` 目录（例如 `~/.config/fnconnect-proxy/run/`）。一个运行目录管理一个后台实例；可用以下环境变量指定独立配置和运行目录，后续管理命令使用相同变量：
+
+```bash
+export FNCONNECT_PROXY_CONFIG=/path/to/config.json
+export FNCONNECT_PROXY_RUN_DIR=/path/to/runtime
+./dist/fnconnect-proxy start
+./dist/fnconnect-proxy status
+./dist/fnconnect-proxy stop
+```
+
+控制接口仅监听随机的本地回环端口，并使用每次启动生成的随机密钥鉴权。管理命令不会按状态文件中的 PID 发送信号，旧状态不会导致误停其他进程。并发启停使用进程间文件锁；后台退出后可再次 `start`。日志按追加方式写入，`logs` 从最近最多 1 MiB 中读取末尾指定行数。启动或停止超时会报告错误和日志路径。
+
+后台进程不自动重启，也不设置开机启动。Linux、macOS 和 Windows 构建均包含 CLI 管理功能。
 
 ## 5. 管理
 
@@ -146,6 +154,12 @@ fnconnect-proxy logout
 ## 安全
 
 `longToken` 是长期登录凭据，应视同密码级秘密。不要上传 `~/.config/fnconnect-proxy/config.json`，不要粘贴到公开日志。helper 只监听 `127.0.0.1`，不要改成 `0.0.0.0`，除非你明确知道风险。
+
+## v1.0.7
+
+- 直接使用 `start` / `stop` / `restart` / `status` / `logs` 管理后台进程。
+- 移除独立 shell 开关；后台运行由 CLI 完成，无需安装系统服务。
+- 后台模式优雅停止，并在退出前关闭代理连接和自动刷新任务。
 
 ## v1.0.6
 

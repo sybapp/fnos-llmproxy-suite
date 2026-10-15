@@ -1,4 +1,4 @@
-# Validation notes — fnconnect-proxy v1.0.6
+# Validation notes — fnconnect-proxy v1.0.7
 
 ## Local verification
 
@@ -33,7 +33,7 @@ matches the token-login flows in the primary SDK sources:
 and [pyfnos](https://github.com/Timandes/pyfnos/blob/main/fnos/client.py).
 The fixture checks HMAC signatures after tokenLogin before issuing entry-token.
 
-Checks passed in this workspace:
+Checks passed in this workspace for the preceding v1.0.6 revision:
 
 ```text
 fnconnect-proxy: go test -race ./...; go vet ./...
@@ -43,16 +43,24 @@ fnconnect-proxy builds: linux/amd64, windows/amd64, darwin/arm64
 
 Windows and macOS builds were cross-compiled; runtime tests ran on Linux.
 
-## Standalone switch
+## CLI process management — v1.0.7
 
-`server.sh` replaces the previous service template with an explicit Linux
-background process switch. Shell syntax and patch whitespace were checked with
-`bash -n server.sh` and `git diff --check`. The user requested no local
-installation or use of this switch, so its start/stop commands were not executed.
+The CLI now contains `start`, `stop`, `restart`, `status`, and `logs`. Background
+processes use a private authenticated loopback endpoint and an instance file lock;
+management commands never signal a PID loaded from disk. Foreground `serve` uses
+the same graceful shutdown path. The standalone shell switch was removed.
+
+The user requested no local installation or use of process management. No real
+background proxy was installed, started, stopped, or restarted for this change.
+Linux/amd64, Windows/amd64 and macOS/arm64 builds, `go vet ./...`, and
+`git diff --check` passed for v1.0.7. Verification is limited to compilation,
+static analysis and patch whitespace;
+CLI lifecycle behavior and Windows/macOS runtime behavior remain untested.
+The refresh tests above and live NAS results below describe the preceding v1.0.6 work.
 
 ## Live NAS verification — 2026-10-15
 
-Using the user's real login and a binary built from the current source, the
+Using the user's real login and a binary built from the v1.0.6 source, the
 following checks passed with TLS certificate verification enabled:
 
 - The initial saved session passed the real unified FN Connect gateway.

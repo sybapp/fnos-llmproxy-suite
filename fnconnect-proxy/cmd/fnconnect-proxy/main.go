@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,26 +16,32 @@ import (
 	"time"
 
 	appcfg "fnconnect-proxy/internal/config"
+	"fnconnect-proxy/internal/daemon"
 	"fnconnect-proxy/internal/fnos"
 	pxy "fnconnect-proxy/internal/proxy"
 )
 
-const version = "1.0.6"
+const version = "1.0.7"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `fnconnect-proxy %s
 
 Commands:
   login    Login to fnOS, save longToken/fnos-token/entry-token (password is not saved)
-  serve    Listen locally and proxy requests through FN Connect
+  serve    Run the proxy in the foreground
+  start    Start the proxy in the background
+  stop     Stop the background proxy
+  restart  Restart the background proxy
+  logs     Show recent background proxy logs
   refresh  Renew fnos-token and entry-token using the saved longToken
-  status   Show configuration and token expiry
+  status   Show process status, configuration and token expiry
   logout   Remove stored tokens
   version  Show version
 
 Examples:
   fnconnect-proxy login --server myid.fnos.net --target https://myid.fnos.net/app/llmproxy --username alice
-  fnconnect-proxy serve
+  fnconnect-proxy start
+  fnconnect-proxy stop
 `, version)
 }
 
@@ -157,6 +164,21 @@ func cmdStatus() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	manager, err := daemon.New(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	state, running, err := manager.Status(ctx)
+	if err != nil {
+		fmt.Printf("process: unavailable (%v)\n", err)
+	} else if running {
+		fmt.Printf("process: running (PID %d)\nprocess listen: %s\nstarted: %s\n", state.PID, state.Listen, state.Started.Format(time.RFC3339))
+	} else {
+		fmt.Println("process: stopped")
+	}
+	fmt.Printf("log: %s\n", manager.LogPath())
 	fmt.Printf("config: %s\nserver: %s\ntarget: %s\nlisten: %s\nusername: %s\nfnos-token: %s  expires: %s\nentry-token: %s  expires: %s\nlongToken: %s  expires: %s\n", path, cfg.Server, cfg.TargetURL, cfg.Listen, cfg.Username, mask(cfg.FNOSToken), fmtTime(cfg.FNOSTokenExpires), mask(cfg.EntryToken), fmtTime(cfg.EntryTokenExpires), mask(cfg.LongToken), fmtTime(cfg.LongTokenExpires))
 }
 func fmtTime(t time.Time) string {
@@ -187,14 +209,70 @@ func cmdLogout() {
 	fmt.Println("tokens cleared")
 }
 
-func cmdServe(args []string) {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	listen := fs.String("listen", "", "override local listen address")
+func cmdProcess(action string, args []string) {
+	fs := flag.NewFlagSet(action, flag.ExitOnError)
+	var listen *string
+	var lines *int
+	if action == "start" || action == "restart" {
+		listen = fs.String("listen", "", "override local listen address")
+	}
+	if action == "logs" {
+		lines = fs.Int("lines", 100, "number of recent log lines (1-10000)")
+	}
 	_ = fs.Parse(args)
+	if fs.NArg() != 0 {
+		log.Fatal("unexpected arguments")
+	}
+	manager, err := daemon.New(cfgPath())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if action == "logs" {
+		if err := manager.Logs(os.Stdout, *lines); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if action == "stop" {
+		if err := manager.Stop(ctx); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("stopped")
+		return
+	}
+	var state daemon.State
+	if action == "restart" {
+		state, err = manager.Restart(ctx, *listen)
+	} else {
+		state, err = manager.Start(ctx, *listen)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("running (PID %d)\nlisten: %s\nlog: %s\n", state.PID, state.Listen, manager.LogPath())
+}
+
+func cmdServe(args []string) {
+	if err := runServe(args); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runServe(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	listen := fs.String("listen", "", "override local listen address")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments")
+	}
 	path := cfgPath()
 	cfg, err := appcfg.Load(path)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if *listen != "" {
 		cfg.Listen = *listen
@@ -203,30 +281,53 @@ func cmdServe(args []string) {
 		cfg.Listen = "127.0.0.1:13431"
 	}
 	if cfg.TargetURL == "" {
-		log.Fatal("target missing; run login first")
+		return fmt.Errorf("target missing; run login first")
 	}
 	mgr := pxy.NewTokenManager(path, cfg)
-	srvHandler, err := pxy.NewServer(mgr, cfg.TargetURL)
+	handler, err := pxy.NewServer(mgr, cfg.TargetURL)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	listener, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	go mgr.AutoRefresh(ctx)
-	server := &http.Server{Addr: cfg.Listen, Handler: srvHandler, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sig
-		cancel()
-		c, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelShutdown()
-		_ = server.Shutdown(c)
-	}()
-	log.Printf("listening on http://%s -> %s", cfg.Listen, cfg.TargetURL)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+	if token := os.Getenv(daemon.TokenEnv); token != "" {
+		_ = os.Unsetenv(daemon.TokenEnv)
+		manager, err := daemon.New(path)
+		if err != nil {
+			return err
+		}
+		control, err := manager.OpenControl(ctx, token, listener.Addr().String(), cancel)
+		if err != nil {
+			return err
+		}
+		defer control.Close()
 	}
+	go mgr.AutoRefresh(ctx)
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
+	shutdownDone := make(chan error, 1)
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		err := server.Shutdown(shutdownCtx)
+		if err != nil {
+			_ = server.Close()
+		}
+		shutdownDone <- err
+	}()
+	log.Printf("listening on http://%s -> %s", listener.Addr(), cfg.TargetURL)
+	serveErr := server.Serve(listener)
+	cancel()
+	shutdownErr := <-shutdownDone
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		return serveErr
+	}
+	return shutdownErr
 }
 
 func main() {
@@ -235,10 +336,14 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "help", "--help", "-h":
+		usage()
 	case "login":
 		cmdLogin(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
+	case "start", "stop", "restart", "logs":
+		cmdProcess(os.Args[1], os.Args[2:])
 	case "refresh":
 		cmdRefresh()
 	case "status":

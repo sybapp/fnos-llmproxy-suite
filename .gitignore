@@ -9,7 +9,7 @@
 !.env.example
 **/config.json
 **/upstream_url
-fnconnect-proxy/.run/
+fnconnect-proxy/run/
 
 # Editors / OS
 .DS_Store

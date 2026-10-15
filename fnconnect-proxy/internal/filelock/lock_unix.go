@@ -1,6 +1,6 @@
 //go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
 
-package config
+package filelock
 
 import (
 	"context"
@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-func lockConfig(ctx context.Context, path string) (func(), error) {
+func Acquire(ctx context.Context, path string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err

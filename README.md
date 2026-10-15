@@ -28,7 +28,7 @@ https://<FN_ID>.fnos.net/app/llmproxy
 
 ## 项目组成
 
-### `fnconnect-proxy/` — v1.0.6
+### `fnconnect-proxy/` — v1.0.7
 
 运行在客户端主机，或与 Codex 位于同一个容器中。
 
@@ -39,7 +39,7 @@ https://<FN_ID>.fnos.net/app/llmproxy
 - 原样保留 LLM 请求中的 `Authorization` 请求头。
 - SSE 流式响应即时转发，不缓存 token stream。
 - 每 30 分钟刷新 `entry-token`；当前 `fnos-token` 失效时使用 `longToken` 续期，并读取运行期间重新登录写入的新凭据。
-- 独立 `server.sh` 开关支持后台启动、停止、重启和查看状态。
+- CLI 内置 `start` / `stop` / `restart` / `status` / `logs`，直接管理后台进程。
 
 详细说明见 [`fnconnect-proxy/README.md`](fnconnect-proxy/README.md)。
 
@@ -76,10 +76,13 @@ go build -o fnconnect-proxy ./cmd/fnconnect-proxy
   --username <FNOS_USER>
 ```
 
-启动代理：
+后台启动和管理代理：
 
 ```bash
-./fnconnect-proxy serve
+./fnconnect-proxy start
+./fnconnect-proxy status
+./fnconnect-proxy restart
+./fnconnect-proxy stop
 ```
 
 测试 LLM API：
@@ -160,7 +163,7 @@ codex
 
 ## 当前版本
 
-- `fnconnect-proxy`: **v1.0.6**
+- `fnconnect-proxy`: **v1.0.7**
 - `fnos-llmproxy`: **v1.2.1**
 
 ## 许可证
