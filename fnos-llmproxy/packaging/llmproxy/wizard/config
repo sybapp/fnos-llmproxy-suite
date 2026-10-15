@@ -1,0 +1,19 @@
+[
+    {
+        "stepTitle": "LLM Proxy 配置",
+        "items": [
+            {
+                "type": "text",
+                "field": "upstream_url",
+                "label": "上游 URL",
+                "placeholder": "https://api.example.com",
+                "initValue": "",
+                "desc": "HTTP/HTTPS 上游基础 URL，例如 https://api.example.com。留空保留当前设置，保存后重启应用生效。"
+            },
+            {
+                "type": "tips",
+                "helpText": "请求路径会原样追加到上游 URL，例如 /v1/models。Authorization 会透传；FN Connect/fnOS 的 entry-token、fnos-token、fnos-long-token Cookie 不会转发给上游。"
+            }
+        ]
+    }
+]

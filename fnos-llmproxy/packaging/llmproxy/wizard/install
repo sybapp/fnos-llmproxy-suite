@@ -1,0 +1,15 @@
+[
+    {
+        "stepTitle": "LLM Proxy 配置",
+        "items": [
+            {
+                "type": "text",
+                "field": "wizard_upstream_url",
+                "label": "上游 URL（可选）",
+                "placeholder": "https://api.example.com",
+                "initValue": "",
+                "desc": "留空时默认代理到本机 http://127.0.0.1:3430。安装后也可在应用设置中修改。"
+            }
+        ]
+    }
+]

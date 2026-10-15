@@ -1,0 +1,33 @@
+#!/bin/bash
+set -u
+
+UPSTREAM_FILE="${TRIM_PKGETC}/upstream_url"
+LOG_FILE="${TRIM_PKGVAR}/config.log"
+value="${upstream_url:-}"
+
+mkdir -p "${TRIM_PKGETC}" "${TRIM_PKGVAR}" 2>/dev/null || true
+
+if [ -z "$value" ]; then
+  echo "[$(date '+%F %T')] upstream_url empty; keeping current value" >> "$LOG_FILE"
+  exit 0
+fi
+
+case "$value" in
+  http://*|https://*) ;;
+  *)
+    echo "上游 URL 必须以 http:// 或 https:// 开头" > "${TRIM_TEMP_LOGFILE:-/tmp/llmproxy-config-error.log}"
+    exit 1
+    ;;
+esac
+
+case "$value" in
+  *$'\n'*|*$'\r'*|*' '*)
+    echo "上游 URL 不能包含空格或换行" > "${TRIM_TEMP_LOGFILE:-/tmp/llmproxy-config-error.log}"
+    exit 1
+    ;;
+esac
+
+printf '%s\n' "$value" > "$UPSTREAM_FILE"
+chmod 600 "$UPSTREAM_FILE" 2>/dev/null || true
+echo "[$(date '+%F %T')] updated upstream URL: $value" >> "$LOG_FILE"
+exit 0

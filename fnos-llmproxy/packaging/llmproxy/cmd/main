@@ -1,0 +1,111 @@
+#!/bin/bash
+
+APP_NAME="${TRIM_APPNAME:-llmproxy}"
+PID_FILE="${TRIM_PKGVAR}/llmproxy.pid"
+LOG_FILE="${TRIM_PKGVAR}/llmproxy.log"
+BIN="${TRIM_APPDEST}/bin/llmproxy"
+UPSTREAM_FILE="${TRIM_PKGETC}/upstream_url"
+GATEWAY_SOCKET="${TRIM_APPDEST_SOCK:-/var/apps/${APP_NAME}/target/app.sock}"
+GATEWAY_PREFIX="/app/${APP_NAME}"
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+running() {
+  [ -f "$PID_FILE" ] || return 1
+  pid="$(cat "$PID_FILE" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+read_upstream_url() {
+  if [ -n "${UPSTREAM_URL:-}" ]; then
+    printf '%s' "$UPSTREAM_URL"
+    return
+  fi
+
+  if [ -f "$UPSTREAM_FILE" ]; then
+    IFS= read -r configured < "$UPSTREAM_FILE"
+    if [ -n "$configured" ]; then
+      printf '%s' "$configured"
+      return
+    fi
+  fi
+
+  printf '%s' "http://127.0.0.1:3430"
+}
+
+start_app() {
+  if running; then
+    exit 0
+  fi
+
+  rm -f "$PID_FILE"
+  mkdir -p "$(dirname "$GATEWAY_SOCKET")" 2>/dev/null || true
+  rm -f "$GATEWAY_SOCKET" 2>/dev/null || true
+
+  upstream="$(read_upstream_url)"
+  log_msg "starting; listen=${TRIM_SERVICE_PORT:-13430}; gateway=${GATEWAY_SOCKET}; prefix=${GATEWAY_PREFIX}; upstream=${upstream}"
+
+  TRIM_SERVICE_PORT="${TRIM_SERVICE_PORT:-13430}" \
+  UPSTREAM_URL="$upstream" \
+  GATEWAY_SOCKET="$GATEWAY_SOCKET" \
+  GATEWAY_PREFIX="$GATEWAY_PREFIX" \
+    "$BIN" >> "$LOG_FILE" 2>&1 &
+
+  echo "$!" > "$PID_FILE"
+  sleep 1
+
+  if ! running; then
+    log_msg "failed to start"
+    exit 1
+  fi
+
+  if [ ! -S "$GATEWAY_SOCKET" ]; then
+    log_msg "warning: gateway socket not created: $GATEWAY_SOCKET"
+  fi
+}
+
+stop_app() {
+  if ! running; then
+    rm -f "$PID_FILE" "$GATEWAY_SOCKET" 2>/dev/null || true
+    exit 0
+  fi
+
+  pid="$(cat "$PID_FILE")"
+  log_msg "stopping pid=$pid"
+  kill -TERM "$pid" 2>/dev/null || true
+
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    log_msg "forcing stop pid=$pid"
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+
+  rm -f "$PID_FILE" "$GATEWAY_SOCKET" 2>/dev/null || true
+}
+
+case "$1" in
+  start)
+    start_app
+    ;;
+  stop)
+    stop_app
+    ;;
+  status)
+    if running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "usage: $0 {start|stop|status}" > "${TRIM_TEMP_LOGFILE:-/tmp/llmproxy-error.log}"
+    exit 1
+    ;;
+esac

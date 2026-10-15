@@ -1,0 +1,16 @@
+{
+  ".url": {
+    "llmproxy.Application": {
+      "title": "LLM Proxy",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "microApp": true,
+      "port": "",
+      "protocol": "http",
+      "gatewaySocket": "app.sock",
+      "gatewayPrefix": "/app/llmproxy",
+      "url": "/app/llmproxy/",
+      "allUsers": true
+    }
+  }
+}
