@@ -28,7 +28,7 @@ https://fnos.net/<FN_ID>/app/llmproxy
 
 ## 项目组成
 
-### `fnconnect-proxy/` — v1.0.7
+### `fnconnect-proxy/` — v1.0.8
 
 运行在客户端主机，或与 Codex 位于同一个容器中。
 
@@ -184,7 +184,7 @@ codex
 
 ## 当前版本
 
-- `fnconnect-proxy`: **v1.0.7**
+- `fnconnect-proxy`: **v1.0.8**
 - `fnos-llmproxy`: **v1.2.1**
 
 ## 许可证
