@@ -62,7 +62,16 @@ func (m *TokenManager) reloadConfigLocked() (bool, error) {
 
 func isUnified(target string) bool {
 	u, err := url.Parse(target)
-	return err == nil && strings.HasPrefix(strings.TrimRight(u.Path, "/")+"/", "/app/")
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, part := range parts {
+		if part == "app" && i+1 < len(parts) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *TokenManager) Refresh(ctx context.Context, force bool) error {
@@ -191,12 +200,12 @@ func (m *TokenManager) AutoRefresh(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-			// Token lifetimes differ across fnOS/FN Connect deployments. Refresh
-			// entry-token periodically and rotate fnos-token if the server rejects it.
-			err := m.Refresh(cctx, true)
+			// Poll every 30 minutes, but only open a control connection when a
+			// token is actually inside its refresh window.
+			err := m.Refresh(cctx, false)
 			cancel()
 			if err != nil {
-				log.Printf("automatic entry-token refresh: %v", err)
+				log.Printf("automatic token refresh: %v", err)
 			}
 		}
 	}
