@@ -21,7 +21,7 @@ import (
 	pxy "fnconnect-proxy/internal/proxy"
 )
 
-const version = "1.0.7"
+const version = "1.0.8"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `fnconnect-proxy %s
@@ -39,7 +39,7 @@ Commands:
   version  Show version
 
 Examples:
-  fnconnect-proxy login --server myid.fnos.net --target https://myid.fnos.net/app/llmproxy --username alice
+  fnconnect-proxy login --server myid.fnos.net --target https://fnos.net/myid/app/llmproxy --username alice
   fnconnect-proxy start
   fnconnect-proxy stop
 `, version)
@@ -67,7 +67,7 @@ func cfgPath() string {
 func cmdLogin(args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	server := fs.String("server", "", "FN Connect host, e.g. myid.fnos.net")
-	target := fs.String("target", "", "App target, e.g. https://myid.fnos.net/app/llmproxy")
+	target := fs.String("target", "", "App target, e.g. https://fnos.net/myid/app/llmproxy")
 	user := fs.String("username", "", "fnOS username")
 	listen := fs.String("listen", "127.0.0.1:13431", "local listen address")
 	passwordStdin := fs.Bool("password-stdin", false, "read password from stdin")
