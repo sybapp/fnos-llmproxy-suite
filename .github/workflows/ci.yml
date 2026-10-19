@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -27,11 +29,122 @@ jobs:
       - name: Vet
         working-directory: ${{ matrix.project }}
         run: go vet ./...
-      - name: Build amd64
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: fnconnect-proxy
+            command: fnconnect-proxy
+            binary: fnconnect-proxy
+            arch: amd64
+          - project: fnconnect-proxy
+            command: fnconnect-proxy
+            binary: fnconnect-proxy
+            arch: arm64
+          - project: fnos-llmproxy
+            command: llmproxy
+            binary: llmproxy
+            arch: amd64
+          - project: fnos-llmproxy
+            command: llmproxy
+            binary: llmproxy
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.project }}/go.mod
+          cache-dependency-path: ${{ matrix.project }}/go.mod
+      - name: Build ${{ matrix.binary }} linux/${{ matrix.arch }}
         working-directory: ${{ matrix.project }}
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
         run: |
-          if [ "${{ matrix.project }}" = "fnconnect-proxy" ]; then
-            GOOS=linux GOARCH=amd64 go build ./cmd/fnconnect-proxy
-          else
-            GOOS=linux GOARCH=amd64 go build ./cmd/llmproxy
+          mkdir -p dist
+          go build -trimpath -ldflags='-s -w' \
+            -o "dist/${{ matrix.binary }}-linux-${{ matrix.arch }}" \
+            "./cmd/${{ matrix.command }}"
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}-linux-${{ matrix.arch }}
+          path: ${{ matrix.project }}/dist/${{ matrix.binary }}-linux-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - test
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/^const version = "\([^"]*\)"$/\1/p' fnconnect-proxy/cmd/fnconnect-proxy/main.go)
+          if [ -z "$VERSION" ]; then
+            echo 'failed to read fnconnect-proxy version' >&2
+            exit 1
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether release tag exists
+        id: tagcheck
+        shell: bash
+        run: |
+          TAG='${{ steps.version.outputs.tag }}'
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all binaries
+        if: steps.tagcheck.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-linux-*'
+          path: release
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        if: steps.tagcheck.outputs.exists == 'false'
+        working-directory: release
+        run: sha256sum * > SHA256SUMS
+
+      - name: Create version tag
+        if: steps.tagcheck.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        if: steps.tagcheck.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" release/* \
+            --title "fnOS LLM Proxy Suite $TAG" \
+            --target "$GITHUB_SHA" \
+            --generate-notes
+
+      - name: Release already exists
+        if: steps.tagcheck.outputs.exists == 'true'
+        run: echo "${{ steps.version.outputs.tag }} already exists; skipping release creation."
