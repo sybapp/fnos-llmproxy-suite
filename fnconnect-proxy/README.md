@@ -1,17 +1,21 @@
-# fnconnect-proxy v1.0.7
+# fnconnect-proxy v1.0.8
 
-# fnconnect-proxy
+本地 Go helper：为 Codex / Claude Code / OpenAI SDK 自动维护 FN Connect `entry-token` / `fnos-token` 会话，并把请求转发到 fnOS 应用。
 
-本地 Go helper：为 Codex / Claude Code / OpenAI SDK 自动维护 FN Connect `entry-token`。
-
-链路：
+推荐链路：
 
 ```text
-Codex -> http://127.0.0.1:13431/v1/... 
-      -> 自动附加认证 Cookie（应用子域用 entry-token；/app 统一网关模拟浏览器会话，使用 mode=relay + language=zh-CN + fnos-token + entry-token）
-      -> https://<FN_ID>.fnos.net/app/llmproxy/v1/...
+Codex -> http://127.0.0.1:13431/v1/...
+      -> 自动附加认证 Cookie
+      -> https://fnos.net/<FN_ID>/app/llmproxy/v1/...
       -> NAS llmproxy
       -> 你的上游 API
+```
+
+统一网关 Cookie 使用：
+
+```text
+mode=relay; language=zh-CN; fnos-token=...; entry-token=...
 ```
 
 ## 特性
@@ -19,23 +23,42 @@ Codex -> http://127.0.0.1:13431/v1/...
 - 首次用户名/密码登录，`stay=true` 获取 `longToken`
 - 密码不写入配置文件
 - 保存 `longToken` / `fnos-token` / `entry-token` / `sign_key`，配置文件权限 0600
-- 每 30 分钟刷新一次 `entry-token`，不依赖固定的过期时间猜测
+- 支持 `/app/<应用>` 与 `/<FN_ID>/app/<应用>` 两种统一网关路径
+- 后台每 30 分钟只检查一次 token 状态；token 未进入刷新窗口时不会建立控制 WebSocket
+- `entry-token` 默认在到期前 2 小时进入刷新窗口
+- `fnos-token` 默认在到期前 30 分钟进入刷新窗口
 - 当前 `fnos-token` 失效或即将过期时，自动使用 `longToken` 换取新会话并更新本地凭据
 - FN Connect 返回“暂无权限访问该服务”或统一网关精确返回 `invalid token` 时，先刷新 entry-token；仍被拒绝则使用 longToken 更新会话，最多重试两次
 - `serve` 运行期间会一起更新重新登录写入的目标地址和凭据；并发刷新不会覆盖新登录或退出的配置
 - 原样保留 Codex 的 `Authorization: Bearer ...`
 - SSE 流式响应每个 chunk 立即 flush
 - 不把 FN 登录 Cookie 暴露给 Codex 配置
+- CLI 内置 `start` / `stop` / `restart` / `status` / `logs`
 
-> 注意：8 小时 / 25 天是本地状态显示使用的生命周期估计，不是飞牛公开 SLA。代理每 30 分钟主动刷新，并在旧会话被拒绝时尝试使用 `longToken` 续期；服务器仍拒绝时会在日志或请求错误中报告续期失败。
+> 注意：8 小时 / 25 天是本地状态显示使用的生命周期估计，不是飞牛公开 SLA。v1.0.8 不再每 30 分钟强制建立控制连接；30 分钟只是本地检查周期。网关主动报告认证失效时仍可能立即触发恢复流程。
 
 ## 1. 首次登录
+
+推荐配置：
 
 ```bash
 fnconnect-proxy login \
   --server YOUR_FN_ID.fnos.net \
-  --target https://llmproxy.YOUR_FN_ID.fnos.net \
+  --target https://fnos.net/YOUR_FN_ID/app/llmproxy \
   --username YOUR_FNOS_USER
+```
+
+其中：
+
+- `server`：用于登录和 token 刷新的控制流，目前仍使用 `YOUR_FN_ID.fnos.net`
+- `target`：用于实际 LLM HTTP 数据流，推荐使用 `fnos.net/<FN_ID>/...` 路径形式
+
+这样持续的 LLM 请求目标主机名是 `fnos.net`，FN ID 位于 HTTPS 加密路径内；登录或 token 刷新控制流仍会访问 `<FN_ID>.fnos.net`。
+
+旧的统一网关 target 仍兼容：
+
+```text
+https://YOUR_FN_ID.fnos.net/app/llmproxy
 ```
 
 程序会交互读取 fnOS 密码。成功后配置写入：
@@ -51,15 +74,23 @@ fnconnect-proxy login \
 ```bash
 printf '%s\n' "$FNOS_PASSWORD" | fnconnect-proxy login \
   --server YOUR_FN_ID.fnos.net \
-  --target https://llmproxy.YOUR_FN_ID.fnos.net \
+  --target https://fnos.net/YOUR_FN_ID/app/llmproxy \
   --username YOUR_FNOS_USER \
   --password-stdin
 ```
 
 ## 2. 启动
 
+前台运行：
+
 ```bash
 fnconnect-proxy serve
+```
+
+后台运行：
+
+```bash
+fnconnect-proxy start
 ```
 
 默认监听：
@@ -81,18 +112,43 @@ curl http://127.0.0.1:13431/v1/models \
   -H 'Authorization: Bearer YOUR_LLM_API_KEY'
 ```
 
-## 3. Codex
+## 3. Token 刷新
+
+后台任务仍每 30 分钟运行一次，但 v1.0.8 调用的是非强制刷新检查：
+
+```text
+每 30 分钟检查
+      ↓
+entry-token 还有 > 2h？ ── 是 ──┐
+fnos-token 还有 > 30m？ ── 是 ─┤→ 不建立控制连接
+      ↓ 否                     │
+建立 FN Connect WebSocket      │
+      ↓                        │
+刷新对应 token                 │
+```
+
+因此如果短期 token 按 8 小时记录，正常情况下不会再固定每 30 分钟访问 `<FN_ID>.fnos.net`；只有接近刷新窗口、手动 `refresh`、重新 `login`，或网关返回认证失效时才需要控制连接。
+
+手动强制刷新：
+
+```bash
+fnconnect-proxy refresh
+```
+
+`refresh` 会使用保存的 `longToken` 强制获取新的 `fnos-token` 和 `entry-token`；没有可用的 `longToken` 时需要重新登录。
+
+## 4. Codex
 
 `~/.codex/config.toml` 示例：
 
 ```toml
 model = "YOUR_MODEL"
-model_provider = "aitrading"
+model_provider = "fnos"
 
-[model_providers.aitrading]
-name = "AI Trading via FN Connect"
+[model_providers.fnos]
+name = "LLM via FN Connect"
 base_url = "http://127.0.0.1:13431/v1"
-env_key = "AITRADING_API_KEY"
+env_key = "LLM_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 ```
@@ -100,13 +156,13 @@ requires_openai_auth = false
 然后：
 
 ```bash
-export AITRADING_API_KEY='YOUR_API_KEY'
+export LLM_API_KEY='YOUR_API_KEY'
 codex
 ```
 
 如果你的上游只支持 Chat Completions 而不是 Responses API，需要按上游能力调整 Codex provider。
 
-## 4. CLI 后台管理
+## 5. CLI 后台管理
 
 编译后直接用 CLI 管理后台进程：
 
@@ -141,7 +197,7 @@ export FNCONNECT_PROXY_RUN_DIR=/path/to/runtime
 
 后台进程不自动重启，也不设置开机启动。Linux、macOS 和 Windows 构建均包含 CLI 管理功能。
 
-## 5. 管理
+## 6. 管理
 
 ```bash
 fnconnect-proxy status
@@ -149,11 +205,19 @@ fnconnect-proxy refresh
 fnconnect-proxy logout
 ```
 
-`refresh` 使用保存的 `longToken` 强制获取新的 `fnos-token` 和 `entry-token`；没有可用的 `longToken` 时需要重新登录。`logout` 仅清除本地 token，不修改 NAS 账号。
+`logout` 仅清除本地 token，不修改 NAS 账号。
 
 ## 安全
 
 `longToken` 是长期登录凭据，应视同密码级秘密。不要上传 `~/.config/fnconnect-proxy/config.json`，不要粘贴到公开日志。helper 只监听 `127.0.0.1`，不要改成 `0.0.0.0`，除非你明确知道风险。
+
+## v1.0.8
+
+- 支持 `https://fnos.net/<FN_ID>/app/<应用>` 形式的统一网关 target。
+- 统一网关检测改为按路径段识别 `app`，兼容带 FN ID 前缀的路径，同时避免误判 `myapp`。
+- 自动任务仍每 30 分钟检查一次，但不再强制刷新；token 未进入刷新窗口时不会建立控制 WebSocket。
+- 推荐数据流使用 `fnos.net/<FN_ID>/...`，登录/刷新 `server` 保持 `<FN_ID>.fnos.net`。
+- 增加 FN ID 路径形式的 Cookie 注入、路径拼接和 `Authorization` 保留测试。
 
 ## v1.0.7
 
@@ -163,9 +227,8 @@ fnconnect-proxy logout
 
 ## v1.0.6
 
-- 基于 v1.0.3 的已验证转发行为：`Authorization` 原样穿透，不做私有 Header 改名。
+- 基于已验证转发行为：`Authorization` 原样穿透，不做私有 Header 改名。
 - `/app/...` Cookie 保持已实测可用的形态：`mode=relay; language=zh-CN; fnos-token=...; entry-token=...`。
-- 自动刷新每 30 分钟执行，降低对 token 生命周期估计的依赖。
 - 旧 `fnos-token` 过期或即将过期时，使用保存的 `longToken` 获取新会话；签名式 `tokenLogin` 沿用已建立的签名密钥，并通过 entry-token 交换验证。
 - 网关仍拒绝已刷新 entry-token 的请求时，强制更新 fnos-token 后再重试，总计最多两次。
 - 目标地址、网关模式和认证 Cookie 使用同一份配置快照，重新登录切换 NAS 时一起生效。
