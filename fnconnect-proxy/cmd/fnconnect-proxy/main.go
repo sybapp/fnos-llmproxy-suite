@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -19,6 +18,8 @@ import (
 	"fnconnect-proxy/internal/daemon"
 	"fnconnect-proxy/internal/fnos"
 	pxy "fnconnect-proxy/internal/proxy"
+
+	"golang.org/x/term"
 )
 
 const version = "1.0.9"
@@ -47,9 +48,13 @@ Examples:
 
 func readPassword() string {
 	fmt.Fprint(os.Stderr, "fnOS password: ")
-	if _, err := exec.LookPath("stty"); err == nil {
-		_ = exec.Command("stty", "-echo").Run()
-		defer exec.Command("stty", "echo").Run()
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err == nil {
+			return strings.TrimSpace(string(b))
+		}
+		return ""
 	}
 	s, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	fmt.Fprintln(os.Stderr)
