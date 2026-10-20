@@ -224,11 +224,24 @@ func parseTarget(target string) (*url.URL, error) {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return nil, errors.New("target must use http or https with a host and no credentials")
 	}
+	// The FN Connect portal serves its SPA for every fnos.net path, so
+	// https://fnos.net/<FN_ID>/app/... returns HTML instead of reaching
+	// the NAS gateway. Only <FN_ID>.fnos.net routes to an app.
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "fnos.net" {
+		return nil, errors.New("fnos.net is the FN Connect portal, not an app gateway; use https://<FN_ID>.fnos.net/app/<app>")
+	}
 	return u, nil
 }
 
+// ValidateTarget checks a configured app target without keeping the parsed URL.
+func ValidateTarget(target string) error {
+	_, err := parseTarget(target)
+	return err
+}
+
 func NewServer(mgr *TokenManager, target string) (*Server, error) {
-	if _, err := parseTarget(target); err != nil {
+	if err := ValidateTarget(target); err != nil {
 		return nil, err
 	}
 	mgr.mu.Lock()

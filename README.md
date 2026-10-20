@@ -11,7 +11,7 @@ Codex / Claude Code / OpenAI 兼容客户端
                   │
                   │ FN Connect 会话 Cookie
                   ▼
-https://fnos.net/<FN_ID>/app/llmproxy
+https://<FN_ID>.fnos.net/app/llmproxy
                   │
                   ▼
           fnOS 统一网关
@@ -28,7 +28,7 @@ https://fnos.net/<FN_ID>/app/llmproxy
 
 ## 项目组成
 
-### `fnconnect-proxy/` — v1.0.8
+### `fnconnect-proxy/` — v1.0.9
 
 运行在客户端主机，或与 Codex 位于同一个容器中。
 
@@ -38,7 +38,7 @@ https://fnos.net/<FN_ID>/app/llmproxy
 - 自动附加 FN Connect / 统一网关所需 Cookie，无需把这些凭据写入 Codex 配置。
 - 原样保留 LLM 请求中的 `Authorization` 请求头。
 - SSE 流式响应即时转发，不缓存 token stream。
-- 支持 `/app/<应用>` 与 `/<FN_ID>/app/<应用>` 两种统一网关路径。
+- 支持 `<FN_ID>.fnos.net/app/<应用>`；拒绝 `fnos.net` 门户路径。
 - 后台每 30 分钟检查一次 token 状态，但只有 token 进入刷新窗口时才建立控制连接；不会再每 30 分钟强制刷新。
 - 当前 `fnos-token` 失效时可使用 `longToken` 续期，并读取运行期间重新登录写入的新凭据。
 - CLI 内置 `start` / `stop` / `restart` / `status` / `logs`，直接管理后台进程。
@@ -74,17 +74,13 @@ go build -o fnconnect-proxy ./cmd/fnconnect-proxy
 ```bash
 ./fnconnect-proxy login \
   --server <FN_ID>.fnos.net \
-  --target https://fnos.net/<FN_ID>/app/llmproxy \
+  --target https://<FN_ID>.fnos.net/app/llmproxy \
   --username <FNOS_USER>
 ```
 
-这里 `server` 用于 fnOS 登录/刷新控制流；`target` 用于实际 LLM HTTP 流量。将 FN ID 放在 HTTPS 路径中，可以避免它直接出现在 LLM 数据流的目标主机名里。
+这里 `server` 用于 fnOS 登录/刷新控制流；`target` 用于实际 LLM HTTP 流量。两者都必须使用 `<FN_ID>.fnos.net`。
 
-旧形式仍兼容：
-
-```text
-https://<FN_ID>.fnos.net/app/llmproxy
-```
+`https://fnos.net/<FN_ID>/app/llmproxy` 不能作为 target：`fnos.net` 是 FN Connect 网页入口，任何路径都会返回门户 SPA，不会转发到 NAS 应用。代理会直接拒绝这种配置。
 
 后台启动和管理代理：
 
@@ -111,7 +107,7 @@ curl http://127.0.0.1:13431/v1/models \
         ↓
 fnconnect-proxy
         ↓ 自动附加 fnOS 会话 Cookie
-https://fnos.net/<FN_ID>/app/llmproxy/v1/responses
+https://<FN_ID>.fnos.net/app/llmproxy/v1/responses
         ↓
 fnOS 统一网关
         ↓
@@ -184,7 +180,7 @@ codex
 
 ## 当前版本
 
-- `fnconnect-proxy`: **v1.0.8**
+- `fnconnect-proxy`: **v1.0.9**
 - `fnos-llmproxy`: **v1.2.1**
 
 ## 许可证

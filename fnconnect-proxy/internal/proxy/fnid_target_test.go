@@ -11,17 +11,17 @@ import (
 	appcfg "fnconnect-proxy/internal/config"
 )
 
-func TestIsUnifiedSupportsFNIDPathPrefix(t *testing.T) {
+func TestIsUnifiedSupportsGatewayPathPrefix(t *testing.T) {
 	tests := []struct {
 		target string
 		want   bool
 	}{
 		{"https://vas4er.fnos.net/app/llmproxy", true},
-		{"https://fnos.net/vas4er/app/llmproxy", true},
-		{"https://fnos.net/vas4er/app/llmproxy/", true},
+		{"https://gateway.example.com/vas4er/app/llmproxy", true},
+		{"https://gateway.example.com/vas4er/app/llmproxy/", true},
 		{"https://example.com/prefix/app/llmproxy", true},
-		{"https://fnos.net/vas4er/myapp/llmproxy", false},
-		{"https://fnos.net/vas4er/app", false},
+		{"https://gateway.example.com/vas4er/myapp/llmproxy", false},
+		{"https://gateway.example.com/vas4er/app", false},
 		{"https://example.com/", false},
 	}
 
@@ -34,7 +34,22 @@ func TestIsUnifiedSupportsFNIDPathPrefix(t *testing.T) {
 	}
 }
 
-func TestFNIDPathGatewayInjectsTokensAndJoinsPath(t *testing.T) {
+func TestValidateTargetRejectsFNConnectPortal(t *testing.T) {
+	for _, target := range []string{
+		"https://fnos.net/vas4er/app/llmproxy",
+		"https://fnos.net/app/llmproxy",
+		"https://FNOS.NET/vas4er/app/llmproxy",
+	} {
+		if err := ValidateTarget(target); err == nil || !strings.Contains(err.Error(), "FN Connect portal") {
+			t.Errorf("ValidateTarget(%q) = %v, want portal rejection", target, err)
+		}
+	}
+	if err := ValidateTarget("https://vas4er.fnos.net/app/llmproxy"); err != nil {
+		t.Fatalf("valid gateway target rejected: %v", err)
+	}
+}
+
+func TestUnifiedPathGatewayInjectsTokensAndJoinsPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/vas4er/app/llmproxy/v1/models" {
 			t.Errorf("unexpected path: %q", r.URL.Path)

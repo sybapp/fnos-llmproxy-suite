@@ -63,4 +63,4 @@ The generated FPK has not been installed on the user's fnOS 1.2.0 in this build 
 1. upgrade 1.1.0 -> 1.2.0;
 2. confirm `/var/apps/llmproxy/target/app.sock` is created;
 3. confirm `https://<FN_ID>.fnos.net/app/llmproxy/...` reaches the socket;
-4. confirm FN Connect `entry-token` grants access through the main-domain unified gateway.
+4. confirm FN Connect `entry-token` grants access through the subdomain unified gateway.

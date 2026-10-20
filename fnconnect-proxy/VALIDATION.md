@@ -93,6 +93,45 @@ Repeating it with the same explicit User-Agent as the successful baseline passed
 the User-Agent was the changed request field. This response should not be treated
 as an fnOS token rejection.
 
+## FN Connect portal path — 2026-10-20
+
+Direct requests with a live saved Cookie pair were compared:
+
+```text
+GET https://fnos.net/<FN_ID>/app/llmproxy/v1/models
+    200 text/html  (FN Connect 远程访问 SPA)
+
+GET https://<FN_ID>.fnos.net/app/llmproxy/v1/models
+    401 application/json  (NAS gateway passed, LLM upstream rejected the test key)
+```
+
+The portal serves its SPA for arbitrary `fnos.net` paths; `fnos.net/<FN_ID>/...`
+is not an app gateway route. `login` and `serve` now reject that target host.
+The `401` proves the request crossed the NAS gateway and reached the configured
+LLM upstream.
+
+A headless browser trace of `https://fnos.net/<FN_ID>/app/llmproxy/v1/models`
+showed:
+
+```text
+document  https://fnos.net/<FN_ID>/app/llmproxy/v1/models   200 SPA
+xhr       POST https://fnos.net/api/v1/fn/con               200
+document  https://<FN_ID>.fnos.net/trimcon                  200
+document  https://<FN_ID>.fnos.net/app/llmproxy/v1/models   200
+```
+
+The portal JavaScript treats the first path segment as the FN ID, calls
+`/api/v1/fn/con`, then sets `window.location` to the returned gateway host. The
+same endpoint returned only `fn: ["<FN_ID>.fnos.net:443"]`; it exposes no
+path-based relay. Header overrides (`Host`, `X-Forwarded-Host`, `X-Real-Host`,
+`X-Forwarded-Prefix`, `X-Forwarded-Uri`) also did not route: `fnos.net` returned
+the SPA, and overriding `Host` to `<FN_ID>.fnos.net` while connecting to
+`fnos.net` produced an ALB `503`.
+
+Therefore a non-browser HTTP client cannot use `fnos.net/<FN_ID>/app/...` as a
+data plane, and a browser that follows the portal always ends on
+`<FN_ID>.fnos.net`, so the FN ID remains in the data-plane host.
+
 ## Scope
 
 The tests simulate rejection immediately, including with real NAS requests. They

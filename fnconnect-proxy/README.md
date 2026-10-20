@@ -1,4 +1,4 @@
-# fnconnect-proxy v1.0.8
+# fnconnect-proxy v1.0.9
 
 本地 Go helper：为 Codex / Claude Code / OpenAI SDK 自动维护 FN Connect `entry-token` / `fnos-token` 会话，并把请求转发到 fnOS 应用。
 
@@ -7,7 +7,7 @@
 ```text
 Codex -> http://127.0.0.1:13431/v1/...
       -> 自动附加认证 Cookie
-      -> https://fnos.net/<FN_ID>/app/llmproxy/v1/...
+      -> https://<FN_ID>.fnos.net/app/llmproxy/v1/...
       -> NAS llmproxy
       -> 你的上游 API
 ```
@@ -23,7 +23,7 @@ mode=relay; language=zh-CN; fnos-token=...; entry-token=...
 - 首次用户名/密码登录，`stay=true` 获取 `longToken`
 - 密码不写入配置文件
 - 保存 `longToken` / `fnos-token` / `entry-token` / `sign_key`，配置文件权限 0600
-- 支持 `/app/<应用>` 与 `/<FN_ID>/app/<应用>` 两种统一网关路径
+- 支持 `/app/<应用>` 统一网关路径；`fnos.net` 门户路径会被拒绝
 - 后台每 30 分钟只检查一次 token 状态；token 未进入刷新窗口时不会建立控制 WebSocket
 - `entry-token` 默认在到期前 2 小时进入刷新窗口
 - `fnos-token` 默认在到期前 30 分钟进入刷新窗口
@@ -35,7 +35,7 @@ mode=relay; language=zh-CN; fnos-token=...; entry-token=...
 - 不把 FN 登录 Cookie 暴露给 Codex 配置
 - CLI 内置 `start` / `stop` / `restart` / `status` / `logs`
 
-> 注意：8 小时 / 25 天是本地状态显示使用的生命周期估计，不是飞牛公开 SLA。v1.0.8 不再每 30 分钟强制建立控制连接；30 分钟只是本地检查周期。网关主动报告认证失效时仍可能立即触发恢复流程。
+> 注意：8 小时 / 25 天是本地状态显示使用的生命周期估计，不是飞牛公开 SLA。v1.0.8 起不再每 30 分钟强制建立控制连接；30 分钟只是本地检查周期。网关主动报告认证失效时仍可能立即触发恢复流程。
 
 ## 1. 首次登录
 
@@ -44,22 +44,16 @@ mode=relay; language=zh-CN; fnos-token=...; entry-token=...
 ```bash
 fnconnect-proxy login \
   --server YOUR_FN_ID.fnos.net \
-  --target https://fnos.net/YOUR_FN_ID/app/llmproxy \
+  --target https://YOUR_FN_ID.fnos.net/app/llmproxy \
   --username YOUR_FNOS_USER
 ```
 
 其中：
 
-- `server`：用于登录和 token 刷新的控制流，目前仍使用 `YOUR_FN_ID.fnos.net`
-- `target`：用于实际 LLM HTTP 数据流，推荐使用 `fnos.net/<FN_ID>/...` 路径形式
+- `server`：用于登录和 token 刷新的控制流，使用 `YOUR_FN_ID.fnos.net`
+- `target`：用于实际 LLM HTTP 数据流，同样使用 `YOUR_FN_ID.fnos.net`
 
-这样持续的 LLM 请求目标主机名是 `fnos.net`，FN ID 位于 HTTPS 加密路径内；登录或 token 刷新控制流仍会访问 `<FN_ID>.fnos.net`。
-
-旧的统一网关 target 仍兼容：
-
-```text
-https://YOUR_FN_ID.fnos.net/app/llmproxy
-```
+`https://fnos.net/<FN_ID>/app/llmproxy` 不是网关 target。`fnos.net` 门户会把任意路径当作网页入口并返回 SPA；代理现在会在登录和启动时直接拒绝该主机名。
 
 程序会交互读取 fnOS 密码。成功后配置写入：
 
@@ -74,7 +68,7 @@ https://YOUR_FN_ID.fnos.net/app/llmproxy
 ```bash
 printf '%s\n' "$FNOS_PASSWORD" | fnconnect-proxy login \
   --server YOUR_FN_ID.fnos.net \
-  --target https://fnos.net/YOUR_FN_ID/app/llmproxy \
+  --target https://YOUR_FN_ID.fnos.net/app/llmproxy \
   --username YOUR_FNOS_USER \
   --password-stdin
 ```
@@ -114,7 +108,7 @@ curl http://127.0.0.1:13431/v1/models \
 
 ## 3. Token 刷新
 
-后台任务仍每 30 分钟运行一次，但 v1.0.8 调用的是非强制刷新检查：
+后台任务仍每 30 分钟运行一次，但 v1.0.8 起调用的是非强制刷新检查：
 
 ```text
 每 30 分钟检查
@@ -211,13 +205,16 @@ fnconnect-proxy logout
 
 `longToken` 是长期登录凭据，应视同密码级秘密。不要上传 `~/.config/fnconnect-proxy/config.json`，不要粘贴到公开日志。helper 只监听 `127.0.0.1`，不要改成 `0.0.0.0`，除非你明确知道风险。
 
+## v1.0.9
+
+- 撤回 `https://fnos.net/<FN_ID>/app/<应用>` target 支持：该地址实际由 FN Connect 网页入口处理，任意路径都返回门户 SPA，不会到达 NAS。
+- `login` 和 `serve` 现在拒绝主机名为 `fnos.net` 的 target，并提示改用 `<FN_ID>.fnos.net`。
+- 数据面恢复为 `https://<FN_ID>.fnos.net/app/<应用>`；Cookie 注入、路径拼接和 `Authorization` 保留测试保留在自定义路径网关上。
+
 ## v1.0.8
 
-- 支持 `https://fnos.net/<FN_ID>/app/<应用>` 形式的统一网关 target。
-- 统一网关检测改为按路径段识别 `app`，兼容带 FN ID 前缀的路径，同时避免误判 `myapp`。
+- 统一网关检测改为按路径段识别 `app`，避免误判 `myapp`。
 - 自动任务仍每 30 分钟检查一次，但不再强制刷新；token 未进入刷新窗口时不会建立控制 WebSocket。
-- 推荐数据流使用 `fnos.net/<FN_ID>/...`，登录/刷新 `server` 保持 `<FN_ID>.fnos.net`。
-- 增加 FN ID 路径形式的 Cookie 注入、路径拼接和 `Authorization` 保留测试。
 
 ## v1.0.7
 

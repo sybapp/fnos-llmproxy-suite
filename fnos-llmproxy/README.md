@@ -94,13 +94,15 @@ https://api.example.com/openai/v1/models
 
 ## fnconnect-proxy 配置
 
-本地 `fnconnect-proxy` 不需要升级二进制，只需把 target 改成主域名 + `/app/llmproxy`：
+使用 `fnconnect-proxy`，target 必须是 FN Connect 子域名 + `/app/llmproxy`：
 
 ```json
 {
   "target_url": "https://<FN_ID>.fnos.net/app/llmproxy"
 }
 ```
+
+`https://fnos.net/<FN_ID>/app/llmproxy` 会被 v1.0.9+ 拒绝：门户对该路径返回 SPA，不会进入 NAS。
 
 Codex 仍然保持：
 
