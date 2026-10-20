@@ -1,4 +1,4 @@
-# fnconnect-proxy v1.0.9
+# fnconnect-proxy v1.0.10
 
 本地 Go helper：为 Codex / Claude Code / OpenAI SDK 自动维护 FN Connect `entry-token` / `fnos-token` 会话，并把请求转发到 fnOS 应用。
 
@@ -204,6 +204,11 @@ fnconnect-proxy logout
 ## 安全
 
 `longToken` 是长期登录凭据，应视同密码级秘密。不要上传 `~/.config/fnconnect-proxy/config.json`，不要粘贴到公开日志。helper 只监听 `127.0.0.1`，不要改成 `0.0.0.0`，除非你明确知道风险。
+
+## v1.0.10
+
+- `login` 的密码输入改用 `golang.org/x/term`，交互式终端下关闭回显。
+- 非 TTY 输入仍按行读取；`--password-stdin` 行为不变。
 
 ## v1.0.9
 

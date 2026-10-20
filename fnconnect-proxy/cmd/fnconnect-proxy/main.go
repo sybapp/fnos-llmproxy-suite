@@ -22,7 +22,7 @@ import (
 	"golang.org/x/term"
 )
 
-const version = "1.0.9"
+const version = "1.0.10"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `fnconnect-proxy %s
